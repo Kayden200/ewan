@@ -1,129 +1,112 @@
-import random
-import string
-import requests
-import asyncio
-from colorama import Fore, init
-import json
 import time
+import random
+import requests
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from webdriver_manager.chrome import ChromeDriverManager
+from colorama import Fore, init
 
-# Initialize Colorama for colored terminal output
 init(autoreset=True)
 
-# Facebook Sign-up URL
-FB_SIGNUP_URL = "https://m.facebook.com/reg"
+# List ng Random Names
+FIRST_NAMES = ["Hiroshi", "Matteo", "Ivan", "Pierre", "Ahmed", "Fatima", "Aisha", "Yuki", "Carlos", "Dimitri", "Sofia", "Elena", "Nia"]
+LAST_NAMES = ["Nakamura", "Rossi", "Petrov", "Dubois", "El-Sayed", "Oliveira", "Takahashi", "García", "Novak", "Müller"]
 
-# List of random first names and last names for account creation
-first_names = ["Hiroshi", "Matteo", "Ivan", "Pierre", "Ahmed", "Fatima", "Aisha", "Yuki", "Carlos", "Dimitri", 
-               "Sofia", "Elena", "Nia", "Viktor", "Lars", "Hana", "Leila", "Miguel", "Amira", "Arvid", "Mikhail", 
-               "Klara", "Júlia", "Katya", "Farhan"]
+def get_temp_mail():
+    try:
+        domain = requests.get("https://api.mail.tm/domains").json()['hydra:member'][0]['domain']
+        username = "".join(random.choices("abcdefghijklmnopqrstuvwxyz1234567890", k=8))
+        email = f"{username}@{domain}"
+        password = "TempPassword123!"
+        requests.post("https://api.mail.tm/accounts", json={"address": email, "password": password})
+        token = requests.post("https://api.mail.tm/token", json={"address": email, "password": password}).json()['token']
+        return email, token
+    except Exception as e:
+        print(Fore.RED + f"[!] Mail.tm Error: {e}")
+        return None, None
 
-last_names = ["Nakamura", "Rossi", "Petrov", "Dubois", "El-Sayed", "Oliveira", "Takahashi", "García", "Novak", 
-              "Müller", "Ibrahim", "Schmidt", "Fernández", "Jovanović", "Weber", "Sato", "Wang", "Lopez", "Kovács", 
-              "Aliyev", "Huber", "Martins", "Pereira", "Moretti", "Sorokin"]
-
-# Generate a random password
-def generate_password():
-    return ''.join(random.choices(string.ascii_letters + string.digits, k=12))
-
-# Generate a random birthday
-def generate_birthday():
-    day = random.randint(1, 28)
-    month = random.randint(1, 12)
-    year = random.randint(1985, 2002)
-    return str(day), str(month), str(year)
-
-# Fetch OTP from TempMail inbox
-async def get_email_otp(email, token):
-    url = f"https://api.mail.tm/v1/mailbox/{email}/messages"
-    headers = {
-        "Authorization": f"Bearer {token}"
-    }
-    response = requests.get(url, headers=headers)
+def setup_driver(proxy=None):
+    options = webdriver.ChromeOptions()
+    # Proxy format: "http://IP:PORT" or "http://user:pass@IP:PORT"
+    if proxy:
+        options.add_argument(f'--proxy-server={proxy}')
     
-    if response.status_code == 200:
-        emails = response.json()
-        for email in emails:
-            if "Facebook" in email['subject']:
-                otp = ''.join(filter(str.isdigit, email['text_body']))  # Extract OTP from the email body
-                if otp:
-                    print(Fore.YELLOW + f"[+] OTP Received: {otp}")
-                    return otp
-    else:
-        print(Fore.RED + "[!] Failed to fetch emails from TempMail.")
-    return None
-
-# Create Facebook account using TempMail generated email
-async def create_facebook_account(token):
-    # Step 1: Generate temporary email using Temp-Mail API
-    url = "https://api.mail.tm/v1/email/new"
-    headers = {
-        "Authorization": f"Bearer {token}"
-    }
-    response = requests.post(url, headers=headers)
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
     
-    if response.status_code == 200:
-        email_data = response.json()
-        email = email_data['mailbox']
-        print(Fore.GREEN + f"[+] Generated Email: {email}")
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    return driver
+
+def run_bot():
+    print(Fore.CYAN + "=== FB Account Creator (Upgraded) ===")
+    
+    # 1. User Input para sa Password
+    user_password = input("Anong password ang gusto mong gamitin para sa lahat ng accounts? ")
+    
+    # 2. Proxy Input (Optional)
+    use_proxy = input("Gagamit ka ba ng Proxy? (Format: IP:PORT o Enter kung wala): ")
+    
+    num_acc = int(input("Ilang accounts ang gagawin natin? "))
+
+    for i in range(num_acc):
+        print(Fore.YELLOW + f"\n[*] Starting Account #{i+1}...")
         
-        # Step 2: Generate random Facebook account details
-        first_name = random.choice(first_names)
-        last_name = random.choice(last_names)
-        password = generate_password()
-        day, month, year = generate_birthday()
-
-        # Step 3: Create Facebook account (simulate form submission)
-        session = requests.Session()
-        data = {
-            "firstname": first_name,
-            "lastname": last_name,
-            "reg_email__": email,
-            "reg_passwd__": password,
-            "sex": "2",  # Male as default
-            "birthday_day": day,
-            "birthday_month": month,
-            "birthday_year": year,
-            "submit": "Sign Up"
-        }
-
-        response = session.post(FB_SIGNUP_URL, data=data)
+        email, token = get_temp_mail()
+        if not email: continue
         
-        if "checkpoint" in response.url:
-            print(Fore.RED + "[!] Facebook detected suspicious activity.")
-            return None
-
-        # Step 4: Retrieve OTP from TempMail inbox
-        otp = await get_email_otp(email, token)
-        if otp:
-            print(Fore.GREEN + f"Account Created Successfully!")
-            print(Fore.GREEN + f"Name: {first_name} {last_name}")
-            print(Fore.GREEN + f"Email: {email}")
-            print(Fore.GREEN + f"Password: {password}")
-            print(Fore.GREEN + f"OTP: {otp}")
-            return {
-                "name": f"{first_name} {last_name}",
-                "email": email,
-                "password": password,
-                "otp": otp
-            }
-
-        print(Fore.RED + "[!] Failed to retrieve OTP.")
-        return None
-
-# Main function to create multiple accounts
-async def main():
-    token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpYXQiOjE3NDIwMDE2MzMsInJvbGVzIjpbIlJPTEVfVVNFUiJdLCJhZGRyZXNzIjoicnlsZUBpbmRpZ29ib29rLmNvbSIsImlkIjoiNjdkNGQyZWU2N2ZmNjk1NmUyMGE4MzI0IiwibWVyY3VyZSI6eyJzdWJzY3JpYmUiOlsiL2FjY291bnRzLzY3ZDRkMmVlNjdmZjY5NTZlMjBhODMyNCJdfX0.wT6o8TvZfcyqA1qriu6YteVtNf4tRQyj0hojBIFvlpYKD5gRk_ACcfvwIy1z-u1Qx-xIVLTl1O6ALaso7d651A"  # Replace with the Bearer token from Mail.tm
-    
-    num_accounts = int(input("Enter the number of accounts to create: "))
-    
-    with open("accounts.txt", "a") as file:
-        for _ in range(num_accounts):
-            account = await create_facebook_account(token)
-            if account:
-                # Save the account details (name, email, password, OTP) to a file
-                file.write(f"Name: {account['name']} | Email: {account['email']} | Password: {account['password']} | OTP: {account['otp']}\n")
+        driver = setup_driver(use_proxy if use_proxy else None)
         
-        print(Fore.GREEN + "[+] All accounts saved in accounts.txt")
+        try:
+            driver.get("https://m.facebook.com/reg")
+            time.sleep(3)
+
+            # Random Name Selection
+            fname = random.choice(FIRST_NAMES)
+            lname = random.choice(LAST_NAMES)
+
+            print(Fore.GREEN + f"[+] Using Name: {fname} {lname}")
+            print(Fore.GREEN + f"[+] Email: {email}")
+
+            # Fill up form
+            driver.find_element(By.NAME, "firstname").send_keys(fname)
+            driver.find_element(By.NAME, "lastname").send_keys(lname)
+            driver.find_element(By.NAME, "reg_email__").send_keys(email)
+            driver.find_element(By.XPATH, f"//input[@value='{random.choice(['1', '2'])}']").click() # Random Sex
+            
+            # Birthday
+            driver.find_element(By.NAME, "birthday_day").send_keys(str(random.randint(1, 28)))
+            driver.find_element(By.NAME, "birthday_month").send_keys(random.choice(["Jan", "Feb", "Mar", "Apr", "May", "Jun"]))
+            driver.find_element(By.NAME, "birthday_year").send_keys(str(random.randint(1990, 2000)))
+            
+            driver.find_element(By.NAME, "reg_passwd__").send_keys(user_password)
+            
+            time.sleep(2)
+            driver.find_element(By.NAME, "submit").click()
+            
+            print(Fore.BLUE + "[*] Registration submitted. Waiting 40s for OTP...")
+            time.sleep(40)
+
+            # Check for OTP via Mail.tm API
+            headers = {"Authorization": f"Bearer {token}"}
+            msgs = requests.get("https://api.mail.tm/messages", headers=headers).json()
+            
+            if msgs['hydra:member']:
+                otp_subject = msgs['hydra:member'][0]['subject']
+                print(Fore.MAGENTA + f"[!] OTP RECEIVED: {otp_subject}")
+                
+                # Save to accounts.txt
+                with open("accounts.txt", "a") as f:
+                    f.write(f"Name: {fname} {lname} | Email: {email} | Pass: {user_password} | Subject: {otp_subject}\n")
+            else:
+                print(Fore.RED + "[!] No OTP found. Baka na-checkpoint ang IP.")
+
+        except Exception as e:
+            print(Fore.RED + f"[!] Error during process: {e}")
+        finally:
+            driver.quit()
+            time.sleep(5) # Konting pahinga bago ang susunod na account
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    run_bot()
